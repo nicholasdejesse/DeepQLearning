@@ -13,7 +13,7 @@ class Network:
             self.bias.append(b)
 
     def result(self, x):
-        return self._forward_pass(np.array(x))[-1][0][0]
+        return self._forward_pass(np.reshape(np.array(x), (1, -1)))[-1][0][0]
 
     def _forward_pass(self, x):
         # Format and add bias term
@@ -33,17 +33,17 @@ class Network:
             res.append(x)
         return res
 
-    def batch_train(self, x, y, batch_size, epochs, learning_rate, loss_at_epochs_debug_list = None):
+    def train(self, x, y, batch_size, epochs, learning_rate, loss_at_epochs_debug_list = None):
         if batch_size > len(x):
             raise Exception("Batch size greater than size of training data")
         x, y = self.clean(x, y)
         for _ in range(epochs):
             sample_indeces = random.sample(range(0, len(x)), batch_size)
             x_samples = np.array([x[i] for i in sample_indeces])
-            y_samples = np.reshape(np.array([y[i] for i in sample_indeces]), (3, 1))
+            y_samples = np.reshape(np.array([y[i] for i in sample_indeces]), (-1, 1))
             result = self._forward_pass(x_samples)
-            loss = self.loss(result[-1], y_samples)
-            loss_deriv = self.loss_deriv(result[-1], y_samples)
+            loss = self.loss(result[-1], y_samples) / batch_size
+            loss_deriv = self.loss_deriv(result[-1], y_samples) / batch_size
 
             if loss_at_epochs_debug_list is not None:
                 loss_at_epochs_debug_list.append(loss)
@@ -66,29 +66,29 @@ class Network:
                 loss_deriv = np.dot(loss_deriv, self.weights[i].T)
                 loss_deriv = np.multiply(loss_deriv, self.relu_deriv(result[i]))
 
-    def sgd_train(self, x, y, epochs, learning_rate, loss_at_epochs_debug_list = None):
-        x, y = self.clean(x, y)
-        for _ in range(epochs):
-            sample = random.randint(0, len(x)-1)
-            result = self._forward_pass(x[sample])
-            loss = self.loss(result[-1], y[sample])
-            loss_deriv = self.loss_deriv(result[-1], y[sample])
+    # def sgd_train(self, x, y, epochs, learning_rate, loss_at_epochs_debug_list = None):
+    #     x, y = self.clean(x, y)
+    #     for _ in range(epochs):
+    #         sample = random.randint(0, len(x)-1)
+    #         result = self._forward_pass(x[sample])
+    #         loss = self.loss(result[-1], y[sample])
+    #         loss_deriv = self.loss_deriv(result[-1], y[sample])
             
-            if loss_at_epochs_debug_list is not None:
-                loss_at_epochs_debug_list.append(loss)
+    #         if loss_at_epochs_debug_list is not None:
+    #             loss_at_epochs_debug_list.append(loss)
 
-            # if (e+1) % 10 == 0:
-            #     print(f"Loss: {loss}")
-            # Traverse weights from right to left
-            for i in range(len(self.weights) - 1, -1, -1):
-                weight_deriv = np.dot(result[i].T, loss_deriv)
-                bias_deriv = loss_deriv
+    #         # if (e+1) % 10 == 0:
+    #         #     print(f"Loss: {loss}")
+    #         # Traverse weights from right to left
+    #         for i in range(len(self.weights) - 1, -1, -1):
+    #             weight_deriv = np.dot(result[i].T, loss_deriv)
+    #             bias_deriv = loss_deriv
 
-                self.weights[i] -= learning_rate * weight_deriv
-                self.bias[i] -= learning_rate * bias_deriv
+    #             self.weights[i] -= learning_rate * weight_deriv
+    #             self.bias[i] -= learning_rate * bias_deriv
 
-                loss_deriv = np.dot(loss_deriv, self.weights[i].T)
-                loss_deriv = np.multiply(loss_deriv, self.relu_deriv(result[i]))
+    #             loss_deriv = np.dot(loss_deriv, self.weights[i].T)
+    #             loss_deriv = np.multiply(loss_deriv, self.relu_deriv(result[i]))
 
     def loss(self, x, target):
         return np.sum(0.5 * np.power(x - target, 2))
