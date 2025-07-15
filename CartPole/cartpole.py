@@ -8,16 +8,18 @@ class CartPoleSolver:
         self.memory = []
     
     def train(self, episodes):
-        pass
+        for _ in episodes:
+            observation, info = env.reset()
+            terminated, truncated = False
+
+            while not terminated or truncated:
+                action = self.q_function.result(observation)
+                observation, reward, terminated, truncated, info = env.step(action)
+
 
 
 env = gym.make("CartPole-v1", render_mode="human")
+solver = CartPoleSolver(env)
 
-observation, info = env.reset(seed=42)
-for _ in range(1000):
-    action = env.action_space.sample()
-    observation, reward, terminated, truncated, info = env.step(action)
-
-    if terminated or truncated:
-        observation, info = env.reset()
+solver.train(10)
 env.close()
