@@ -31,7 +31,6 @@ class Network:
             x = x + self.bias[i]
             if i < len(self.weights) - 1:
                 x = self.relu(x)
-            # print(x)
             res.append(x)
         return res
 
@@ -46,8 +45,6 @@ class Network:
             result = self._forward_pass(x_samples)
             loss = self.loss(result[-1], y_samples) / batch_size
             loss_deriv = self.loss_deriv(result[-1], y_samples) / batch_size
-
-            # print(loss_deriv)
 
             if loss_at_epochs_debug_list is not None:
                 loss_at_epochs_debug_list.append(loss)
@@ -69,6 +66,7 @@ class Network:
     def loss_deriv(self, x, target):
         return x - target
 
+    # Not used right now but may be in the future
     # def sigmoid(self, x):
     #     return 1 / (1 + np.exp(-x))
     
