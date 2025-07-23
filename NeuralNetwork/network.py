@@ -7,8 +7,8 @@ class Network:
         self.layers = layers
         self.weights = []
         self.bias = []
+        self.gradient_clip = math.inf
         for i in range(len(layers) - 1):
-            # TODO: Check for bug in initialization since exploding gradients happen quite often
             w = np.random.normal(0, math.sqrt(2 / layers[i]), (layers[i], layers[i+1]))
             b = np.random.normal(0, math.sqrt(2 / layers[i]), (1, layers[i+1]))
             self.weights.append(w)
@@ -34,7 +34,7 @@ class Network:
             res.append(x)
         return res
 
-    def train(self, x, y, batch_size, epochs, learning_rate, loss_at_epochs_debug_list = None):
+    def train(self, x, y, batch_size, epochs, learning_rate, actions_to_focus = None, loss_at_epochs_debug_list = None):
         if batch_size > len(x):
             raise Exception("Batch size greater than size of training data")
         x, y = self.clean(x, y)
@@ -42,9 +42,14 @@ class Network:
             sample_indeces = random.sample(range(0, len(x)), batch_size)
             x_samples = np.array([x[i] for i in sample_indeces])
             y_samples = np.reshape(np.array([y[i] for i in sample_indeces]), (self.layers[-1], -1)).T
+
+            actions = None
+            if actions_to_focus is not None:
+                actions = [actions_to_focus[i] for i in sample_indeces]
+
             result = self._forward_pass(x_samples)
-            loss = self.loss(result[-1], y_samples) / batch_size
-            loss_deriv = self.loss_deriv(result[-1], y_samples) / batch_size
+            loss = self.loss(result[-1], y_samples, actions) / batch_size
+            loss_deriv = self.loss_deriv(result[-1], y_samples, actions) / batch_size
 
             if loss_at_epochs_debug_list is not None:
                 loss_at_epochs_debug_list.append(loss)
@@ -54,17 +59,32 @@ class Network:
                 weight_deriv = np.dot(result[i].T, loss_deriv).mean(axis=1, keepdims=True)
                 bias_deriv = loss_deriv.sum(axis=0, keepdims=True)
 
+                weight_deriv = np.clip(weight_deriv, -1 * self.gradient_clip, self.gradient_clip)
+                bias_deriv = np.clip(bias_deriv, -1 * self.gradient_clip, self.gradient_clip)
+
                 self.weights[i] -= learning_rate * weight_deriv
                 self.bias[i] -= learning_rate * bias_deriv
 
                 loss_deriv = np.dot(loss_deriv, self.weights[i].T)
                 loss_deriv = np.multiply(loss_deriv, self.relu_deriv(result[i]))
 
-    def loss(self, x, target):
-        return np.sum(0.5 * np.power(x - target, 2))
+    def loss(self, x, target, actions):
+        mse = 0.5 * np.power(x - target, 2)
+        if actions is not None:
+            for i, c in enumerate(mse):
+                keep = c[actions[i]]
+                c.fill(0)
+                c[actions[i]] = keep
+        return np.sum(mse)
 
-    def loss_deriv(self, x, target):
-        return x - target
+    def loss_deriv(self, x, target, actions):
+        deriv = x - target
+        if actions is not None:
+            for i, c in enumerate(deriv):
+                keep = c[actions[i]]
+                c.fill(0)
+                c[actions[i]] = keep
+        return deriv
 
     # Not used right now but may be in the future
     # def sigmoid(self, x):
