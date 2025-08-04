@@ -3,6 +3,7 @@ from collections import deque
 import random
 import gymnasium as gym
 import math
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -11,7 +12,7 @@ import torch.nn.functional as F
 
 ENV_ID = "CartPole-v1"
 
-BATCH_SIZE = 32
+BATCH_SIZE = 4
 LEARNING_RATE = 0.0001
 DISCOUNT = 0.99
 MEMORY_CAPACITY = 10000
@@ -28,15 +29,17 @@ class Memory:
         self.mem = deque(maxlen=capacity)
 
     def append(self, *args):
-        self.mem.append(Transition(args))
+        self.mem.append(Transition(*args))
 
     def sample(self, k):
         return random.sample(self.mem, k)
+    
+    def __len__(self):
+        return len(self.mem)
 
 class DeepQNetwork(nn.Module):
     def __init__(self, input_features, actions):
         super().__init__()
-        self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(input_features, 128),
             nn.ReLU(),
@@ -46,14 +49,14 @@ class DeepQNetwork(nn.Module):
         )
     
     def forward(self, x):
-        x = self.flatten(x)
-        return torch.argmax(self.linear_relu_stack(x))
+        return self.linear_relu_stack(x)
 
 class Solver:
     def __init__(self, env, device):
         self.env = env
-        self.q_net = DeepQNetwork(train_env.observation_space.shape[0], train_env.action_space.n).to(device)
-        self.target_net = DeepQNetwork(train_env.observation_space.shape[0], train_env.action_space.n).to(device)
+        self.device = device
+        self.q_net = DeepQNetwork(env.observation_space.shape[0], env.action_space.n).to(device)
+        self.target_net = DeepQNetwork(env.observation_space.shape[0], env.action_space.n).to(device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.SGD(self.q_net.parameters(), lr=LEARNING_RATE)
         self.memory = Memory(MEMORY_CAPACITY)
@@ -64,20 +67,27 @@ class Solver:
     def train(self, episodes):
         for e in range(episodes):
             observation, _ = self.env.reset()
+            observation = torch.tensor(observation, device=self.device)
             terminated, truncated = False, False
             reward_this_episode = 0
 
             while not terminated and not truncated:
-                action = self.__select_action(observation)
+                action = self.select_action(observation).item()
                 next_observation, reward, terminated, truncated, _ = self.env.step(action)
-                self.memory.append(observation, action, reward, next_observation, terminated or truncated)
-
-                observation = next_observation
 
                 reward_this_episode += reward
                 if terminated or truncated:
                     self.rewards.append(reward_this_episode)
                     reward_this_episode = 0
+
+                action = torch.tensor([action], device=self.device)
+                reward = torch.tensor([reward], device=self.device)
+                next_observation = torch.tensor(next_observation, device=self.device)
+                done = torch.tensor([terminated], device=self.device, dtype=torch.bool)
+
+                self.memory.append(observation, action, reward, next_observation, done)
+
+                observation = next_observation
 
                 self.__optimize()
 
@@ -86,31 +96,71 @@ class Solver:
                     self.target_net.load_state_dict(self.q_net.state_dict())
 
     def __optimize(self):
-        samples = self.memory.sample(BATCH_SIZE)
+        if len(self.memory) < BATCH_SIZE:
+            return
+        batch = Transition(*zip(*self.memory.sample(BATCH_SIZE)))
 
-        states = torch.Tensor([s.state for s in samples])
+        states = torch.stack(batch.state)
+        actions = torch.stack(batch.action)
+        rewards = torch.stack(batch.reward).squeeze()
+        next_states = torch.stack(batch.next_state)
+        is_done = torch.stack(batch.done).squeeze()
 
         state_action_output = self.q_net(states)
 
-        loss = F.cross_entropy(state_action_output, state_action_expected)
+        with torch.no_grad():
+            state_action_expected = self.target_net(states)
+            next_state_action_max = self.target_net(next_states).max(1).values
+        
+        next_state_action_max *= DISCOUNT * (~is_done)
+        next_state_action_max += rewards
+    
+        state_action_expected = state_action_expected.scatter(1, actions, next_state_action_max.unsqueeze(1))
+            
+        # Create mask with same shape as state_action_expected corresponding to the action that needs to be updated
 
-        self.q_net.zero_grad()
+        loss = nn.SmoothL1Loss()(state_action_output, state_action_expected)
+
+        self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
                 
-    def __select_action(self, observation):
+    def select_action(self, observation):
         r = random.random()
         eps = EPS_END + (EPS_START - EPS_END) * math.exp(-1 * self.frames_trained / EPS_DECAY)
         if r < eps:
             return self.env.action_space.sample()
         else:
             with torch.no_grad():
-                return self.q_net(observation)
+                return torch.argmax(self.q_net(observation))
 
 
 device = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else "cpu"
-print(f"Using {device}")
 
 train_env = gym.make(ENV_ID)
 solver = Solver(train_env, device)
 solver.train(1000)
+train_env.close()
+
+plt.plot(solver.rewards)
+plt.title("Rewards over episodes")
+plt.xlabel("Episode")
+plt.ylabel("Reward")
+plt.show()
+
+# Show visual after training complete
+human_env = gym.make("CartPole-v1", render_mode="human")
+for _ in range(5):
+    observation, info = human_env.reset()
+
+    terminated, truncated = False, False
+    while True:
+        action = solver.select_action(torch.tensor(observation, device=device)).item()
+        observation, reward, terminated, truncated, info = human_env.step(action)
+        if terminated:
+            break
+        if truncated:
+            print("Episode truncated")
+            break
+
+human_env.close()

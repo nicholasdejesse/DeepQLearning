@@ -60,7 +60,7 @@ class CartPoleSolver:
                     targets = []
                     for mem in batch:
                         input_observations.append(np.copy(mem[0]))
-                        target_output = np.copy(self.target_network.result(mem[0]))
+                        target_output = self.target_network.result(mem[0])
                         if mem[4] or mem[5]: # If memory terminates or truncates
                             target_output[int(mem[1])] = mem[2]
                         else:
