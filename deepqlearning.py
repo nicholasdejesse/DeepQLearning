@@ -111,14 +111,9 @@ class Solver:
         with torch.no_grad():
             next_state_action_max = self.target_net(next_states).max(1).values
         
-            # next_state_action_max *= DISCOUNT * (~is_done)
-            # next_state_action_max += rewards
-
-            target = rewards + (~is_done) * DISCOUNT * next_state_action_max
-    
-        # state_action_expected = state_action_expected.scatter(1, actions, next_state_action_max.unsqueeze(1))
-            
-        loss = nn.MSELoss()(state_action_output, target.unsqueeze(1))
+        next_state_action_max = rewards + (~is_done) * DISCOUNT * next_state_action_max
+                
+        loss = nn.MSELoss()(state_action_output, next_state_action_max.unsqueeze(1))
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -138,7 +133,7 @@ device = torch.accelerator.current_accelerator() if torch.accelerator.is_availab
 
 train_env = gym.make(ENV_ID)
 solver = Solver(train_env, device)
-solver.train(1000)
+solver.train(2000)
 train_env.close()
 
 plt.plot(solver.rewards)
@@ -156,10 +151,7 @@ for _ in range(5):
     while True:
         action = solver.select_action(torch.tensor(observation, device=device)).item()
         observation, reward, terminated, truncated, info = human_env.step(action)
-        if terminated:
-            break
-        if truncated:
-            print("Episode truncated")
+        if terminated or truncated:
             break
 
 human_env.close()
