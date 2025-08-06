@@ -12,7 +12,7 @@ import torch.nn.functional as F
 
 ENV_ID = "CartPole-v1"
 
-BATCH_SIZE = 4
+BATCH_SIZE = 32
 LEARNING_RATE = 0.0001
 DISCOUNT = 0.99
 MEMORY_CAPACITY = 10000
@@ -106,20 +106,19 @@ class Solver:
         next_states = torch.stack(batch.next_state)
         is_done = torch.stack(batch.done).squeeze()
 
-        state_action_output = self.q_net(states)
+        state_action_output = self.q_net(states).gather(1, actions)
 
         with torch.no_grad():
-            state_action_expected = self.target_net(states)
             next_state_action_max = self.target_net(next_states).max(1).values
         
-        next_state_action_max *= DISCOUNT * (~is_done)
-        next_state_action_max += rewards
-    
-        state_action_expected = state_action_expected.scatter(1, actions, next_state_action_max.unsqueeze(1))
-            
-        # Create mask with same shape as state_action_expected corresponding to the action that needs to be updated
+            # next_state_action_max *= DISCOUNT * (~is_done)
+            # next_state_action_max += rewards
 
-        loss = nn.SmoothL1Loss()(state_action_output, state_action_expected)
+            target = rewards + (~is_done) * DISCOUNT * next_state_action_max
+    
+        # state_action_expected = state_action_expected.scatter(1, actions, next_state_action_max.unsqueeze(1))
+            
+        loss = nn.MSELoss()(state_action_output, target.unsqueeze(1))
 
         self.optimizer.zero_grad()
         loss.backward()
