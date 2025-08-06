@@ -7,11 +7,12 @@ import gymnasium as gym
 import math
 import matplotlib.pyplot as plt
 import argparse
+import numpy as np
+import time
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 
 BATCH_SIZE = 32
 LEARNING_RATE = 0.0001
@@ -139,21 +140,32 @@ device = torch.accelerator.current_accelerator() if torch.accelerator.is_availab
 
 parser = argparse.ArgumentParser(
     prog="Deep Q Learning",
-    description="A deep q learning implementation for solving some environments in Farama's Gymnasium"
+    description="A deep q learning implementation for solving some of the classic control environments (Acrobot, Cart Pole, Mountain Car, Pendulum) in Farama's Gymnasium"
 )
 parser.add_argument("environment", help="The name of the environment to use.")
 parser.add_argument("--train", nargs=2, help="Flag to train the model. Specify the number of episodes to train for and the filename of the model. Will render a graph of rewards after training completes.")
 parser.add_argument("--load", help="Loads the model at the given filepath and renders the environment to use it on for 10 episodes.")
 args = parser.parse_args()
 
+# Graph epsilon decay
+# x_vals = np.linspace(0, 10000, 10000)
+# y_vals = EPS_END + (EPS_START - EPS_END) * np.exp(x_vals * -1 / EPS_DECAY)
+# plt.plot(y_vals)
+# plt.xlabel("Frame")
+# plt.ylabel("Epsilon")
+# plt.title("Epsilon over frames")
+# plt.show()
+
 if args.train:
     print("Beginning training.")
+    start = time.time()
     train_env = gym.make(args.environment)
     network = DeepQNetwork(train_env, device)
     network.train(int(args.train[0]))
     train_env.close()
     torch.save(network.q_net.state_dict(), args.train[1])
-    print("Training complete.")
+    end = time.time()
+    print(f"Training complete after {int((end - start) // 60)} mins {round((end - start) % 60, 2)} secs.")
 
     plt.plot(network.rewards)
     plt.title("Rewards over episodes")
