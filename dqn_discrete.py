@@ -1,16 +1,17 @@
+# Some sections inspired by code found here: https://docs.pytorch.org/tutorials/intermediate/reinforcement_q_learning.html#dqn-algorithm
+
 from collections import namedtuple
 from collections import deque
 import random
 import gymnasium as gym
 import math
 import matplotlib.pyplot as plt
+import argparse
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-
-ENV_ID = "CartPole-v1"
 
 BATCH_SIZE = 32
 LEARNING_RATE = 0.0001
@@ -37,7 +38,7 @@ class Memory:
     def __len__(self):
         return len(self.mem)
 
-class DeepQNetwork(nn.Module):
+class LinearRelu(nn.Module):
     def __init__(self, input_features, actions):
         super().__init__()
         self.linear_relu_stack = nn.Sequential(
@@ -51,28 +52,30 @@ class DeepQNetwork(nn.Module):
     def forward(self, x):
         return self.linear_relu_stack(x)
 
-class Solver:
+class DeepQNetwork:
     def __init__(self, env, device):
         self.env = env
         self.device = device
-        self.q_net = DeepQNetwork(env.observation_space.shape[0], env.action_space.n).to(device)
-        self.target_net = DeepQNetwork(env.observation_space.shape[0], env.action_space.n).to(device)
+        self.q_net = LinearRelu(env.observation_space.shape[0], env.action_space.n).to(device)
+        self.target_net = LinearRelu(env.observation_space.shape[0], env.action_space.n).to(device)
         self.target_net.load_state_dict(self.q_net.state_dict())
-        self.optimizer = optim.SGD(self.q_net.parameters(), lr=LEARNING_RATE)
+        self.optimizer = optim.Adam(self.q_net.parameters(), lr=LEARNING_RATE)
         self.memory = Memory(MEMORY_CAPACITY)
 
         self.frames_trained = 0
         self.rewards = []
 
     def train(self, episodes):
-        for e in range(episodes):
+        self.q_net.train()
+        self.target_net.train()
+        for _ in range(episodes):
             observation, _ = self.env.reset()
             observation = torch.tensor(observation, device=self.device)
             terminated, truncated = False, False
             reward_this_episode = 0
 
             while not terminated and not truncated:
-                action = self.select_action(observation).item()
+                action = self.__select_action(observation).item()
                 next_observation, reward, terminated, truncated, _ = self.env.step(action)
 
                 reward_this_episode += reward
@@ -119,7 +122,7 @@ class Solver:
         loss.backward()
         self.optimizer.step()
                 
-    def select_action(self, observation):
+    def __select_action(self, observation):
         r = random.random()
         eps = EPS_END + (EPS_START - EPS_END) * math.exp(-1 * self.frames_trained / EPS_DECAY)
         if r < eps:
@@ -128,30 +131,49 @@ class Solver:
             with torch.no_grad():
                 return torch.argmax(self.q_net(observation))
 
+    # Only used during testing once training is complete
+    def evaluate(self, observation):
+        return torch.argmax(self.q_net(observation)).item()
 
 device = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else "cpu"
 
-train_env = gym.make(ENV_ID)
-solver = Solver(train_env, device)
-solver.train(2000)
-train_env.close()
+parser = argparse.ArgumentParser(
+    prog="Deep Q Learning",
+    description="A deep q learning implementation for solving some environments in Farama's Gymnasium"
+)
+parser.add_argument("environment", help="The name of the environment to use.")
+parser.add_argument("--train", nargs=2, help="Flag to train the model. Specify the number of episodes to train for and the filename of the model. Will render a graph of rewards after training completes.")
+parser.add_argument("--load", help="Loads the model at the given filepath and renders the environment to use it on for 10 episodes.")
+args = parser.parse_args()
 
-plt.plot(solver.rewards)
-plt.title("Rewards over episodes")
-plt.xlabel("Episode")
-plt.ylabel("Reward")
-plt.show()
+if args.train:
+    print("Beginning training.")
+    train_env = gym.make(args.environment)
+    network = DeepQNetwork(train_env, device)
+    network.train(int(args.train[0]))
+    train_env.close()
+    torch.save(network.q_net.state_dict(), args.train[1])
+    print("Training complete.")
 
-# Show visual after training complete
-human_env = gym.make("CartPole-v1", render_mode="human")
-for _ in range(5):
-    observation, info = human_env.reset()
+    plt.plot(network.rewards)
+    plt.title("Rewards over episodes")
+    plt.xlabel("Episode")
+    plt.ylabel("Reward")
+    plt.show()
 
-    terminated, truncated = False, False
-    while True:
-        action = solver.select_action(torch.tensor(observation, device=device)).item()
-        observation, reward, terminated, truncated, info = human_env.step(action)
-        if terminated or truncated:
-            break
+if args.load:
+    human_env = gym.make(args.environment, render_mode="human")
+    network = DeepQNetwork(human_env, device)
+    network.q_net.eval()
+    network.q_net.load_state_dict(torch.load(args.load, weights_only=True))
+    for _ in range(10):
+        observation, info = human_env.reset()
 
-human_env.close()
+        terminated, truncated = False, False
+        while True:
+            action = network.evaluate(torch.tensor(observation, device=device))
+            observation, reward, terminated, truncated, info = human_env.step(action)
+            if terminated or truncated:
+                break
+
+    human_env.close()
