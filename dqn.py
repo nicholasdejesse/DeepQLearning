@@ -3,25 +3,24 @@
 from collections import namedtuple
 from collections import deque
 import random
-import gymnasium as gym
 import math
 import matplotlib.pyplot as plt
-import argparse
 import numpy as np
-import time
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torchvision.transforms import v2
 
+# Hyperparameters
 BATCH_SIZE = 32
 LEARNING_RATE = 0.0001
 DISCOUNT = 0.99
-MEMORY_CAPACITY = 10000
-TARGET_NET_UPDATE = 100
+MEMORY_CAPACITY = 1000000
+TARGET_NET_UPDATE = 1000
 
 EPS_START = 1
-EPS_END = 0.01
+EPS_END = 0.1
 EPS_DECAY = 2500
 
 Transition = namedtuple("Transition", ("state", "action", "reward", "next_state", "done"))
@@ -39,29 +38,20 @@ class Memory:
     def __len__(self):
         return len(self.mem)
 
-class LinearRelu(nn.Module):
-    def __init__(self, input_features, actions):
-        super().__init__()
-        self.linear_relu_stack = nn.Sequential(
-            nn.Linear(input_features, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, actions)
-        )
-    
-    def forward(self, x):
-        return self.linear_relu_stack(x)
-
 class DeepQNetwork:
-    def __init__(self, env, device):
+    def __init__(self, env, device, network, net_input, net_output, num_context_observations = 1):
         self.env = env
         self.device = device
-        self.q_net = LinearRelu(env.observation_space.shape[0], env.action_space.n).to(device)
-        self.target_net = LinearRelu(env.observation_space.shape[0], env.action_space.n).to(device)
+        self.q_net = network(net_input, net_output).to(device)
+        self.target_net = network(net_input, net_output).to(device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=LEARNING_RATE)
         self.memory = Memory(MEMORY_CAPACITY)
+
+        self.num_context_observations = num_context_observations     # Number of consecutive observations to consider. Default = 1 (only consider the current observation)
+        self.context = deque(maxlen=self.num_context_observations)
+        self.transforms = None                # Transforms to apply to observation before storing (used in Atari environments)
+        self.frame_skipping = 1
 
         self.frames_trained = 0
         self.rewards = []
@@ -69,15 +59,34 @@ class DeepQNetwork:
     def train(self, episodes):
         self.q_net.train()
         self.target_net.train()
+        frame_skip = FrameSkipper(self.frame_skipping)
         for _ in range(episodes):
+            frame_skip.reset()
             observation, _ = self.env.reset()
-            observation = torch.tensor(observation, device=self.device)
+            if self.transforms is not None:
+                observation = self.transforms(observation)
+            else:
+                observation = torch.tensor(observation, device=self.device)
+
+            if self.num_context_observations > 1:
+                self.context.clear()
+                for _ in range(self.num_context_observations):
+                    self.context.append(observation.detach().clone())     # Fill queue with initial observation
+
             terminated, truncated = False, False
             reward_this_episode = 0
 
             while not terminated and not truncated:
-                action = self.__select_action(observation).item()
+                if self.num_context_observations > 1:
+                    action = self.__select_action(torch.stack(tuple(self.context)).squeeze().to(self.device)).item()
+                else:
+                    action = self.__select_action(observation).item()
+                action = frame_skip.get_action(action)
+
                 next_observation, reward, terminated, truncated, _ = self.env.step(action)
+                if self.transforms is not None:
+                    next_observation = self.transforms(next_observation)
+
 
                 reward_this_episode += reward
                 if terminated or truncated:
@@ -86,10 +95,17 @@ class DeepQNetwork:
 
                 action = torch.tensor([action], device=self.device)
                 reward = torch.tensor([reward], device=self.device)
-                next_observation = torch.tensor(next_observation, device=self.device)
+                if self.transforms is None:
+                    next_observation = torch.tensor(next_observation, device=self.device)
                 done = torch.tensor([terminated], device=self.device, dtype=torch.bool)
 
-                self.memory.append(observation, action, reward, next_observation, done)
+                if self.num_context_observations > 1:
+                    old_context = torch.stack(tuple(self.context))
+                    self.context.append(next_observation)
+                    next_context = torch.stack(tuple(self.context))
+                    self.memory.append(old_context, action, reward, next_context, done)
+                else:
+                    self.memory.append(observation, action, reward, next_observation, done)
 
                 observation = next_observation
 
@@ -104,12 +120,13 @@ class DeepQNetwork:
             return
         batch = Transition(*zip(*self.memory.sample(BATCH_SIZE)))
 
-        states = torch.stack(batch.state)
+        states = torch.stack(batch.state).squeeze().to(self.device)
         actions = torch.stack(batch.action)
         rewards = torch.stack(batch.reward).squeeze()
-        next_states = torch.stack(batch.next_state)
+        next_states = torch.stack(batch.next_state).squeeze().to(self.device)
         is_done = torch.stack(batch.done).squeeze()
 
+        # print(f"State shape: {self.q_net(states).shape}")
         state_action_output = self.q_net(states).gather(1, actions)
 
         with torch.no_grad():
@@ -130,62 +147,31 @@ class DeepQNetwork:
             return self.env.action_space.sample()
         else:
             with torch.no_grad():
+                # # print(observation)
+                # print(self.q_net(observation).shape)
                 return torch.argmax(self.q_net(observation))
 
     # Only used during testing once training is complete
     def evaluate(self, observation):
         return torch.argmax(self.q_net(observation)).item()
+    
+class FrameSkipper:
+    def __init__(self, k):
+        self.k = k
+        self.count = 0
+        self.previous_action = None
 
-device = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else "cpu"
+    def reset(self):
+        self.count = 0
+        self.previous_action = None
 
-parser = argparse.ArgumentParser(
-    prog="Deep Q Learning",
-    description="A deep q learning implementation for solving some of the classic control environments (Acrobot, Cart Pole, Mountain Car, Pendulum) in Farama's Gymnasium"
-)
-parser.add_argument("environment", help="The name of the environment to use.")
-parser.add_argument("--train", nargs=2, help="Flag to train the model. Specify the number of episodes to train for and the filename of the model. Will render a graph of rewards after training completes.")
-parser.add_argument("--load", help="Loads the model at the given filepath and renders the environment to use it on for 30 episodes.")
-args = parser.parse_args()
-
-# Graph epsilon decay
-# x_vals = np.linspace(0, 10000, 10000)
-# y_vals = EPS_END + (EPS_START - EPS_END) * np.exp(x_vals * -1 / EPS_DECAY)
-# plt.plot(y_vals)
-# plt.xlabel("Frame")
-# plt.ylabel("Epsilon")
-# plt.title("Epsilon over frames")
-# plt.show()
-
-if args.train:
-    print("Beginning training.")
-    start = time.time()
-    train_env = gym.make(args.environment)
-    network = DeepQNetwork(train_env, device)
-    network.train(int(args.train[0]))
-    train_env.close()
-    torch.save(network.q_net.state_dict(), args.train[1])
-    end = time.time()
-    print(f"Training complete after {int((end - start) // 60)} mins {round((end - start) % 60, 2)} secs.")
-
-    plt.plot(network.rewards)
-    plt.title("Rewards over episodes")
-    plt.xlabel("Episode")
-    plt.ylabel("Reward")
-    plt.show()
-
-if args.load:
-    human_env = gym.make(args.environment, render_mode="human")
-    network = DeepQNetwork(human_env, device)
-    network.q_net.eval()
-    network.q_net.load_state_dict(torch.load(args.load, weights_only=True))
-    for _ in range(30):
-        observation, info = human_env.reset()
-
-        terminated, truncated = False, False
-        while True:
-            action = network.evaluate(torch.tensor(observation, device=device))
-            observation, reward, terminated, truncated, info = human_env.step(action)
-            if terminated or truncated:
-                break
-
-    human_env.close()
+    # Returns either the action passed in or the previous action depending on the count
+    def get_action(self, action):
+        if self.count % self.k == 0:
+            self.previous_action = action
+            self.count = 0
+            res = action
+        else:
+            res = self.previous_action
+        self.count += 1
+        return res
