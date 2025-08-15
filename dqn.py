@@ -6,6 +6,7 @@ import random
 import math
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -16,7 +17,7 @@ from torchvision.transforms import v2
 BATCH_SIZE = 32
 LEARNING_RATE = 0.0001
 DISCOUNT = 0.99
-MEMORY_CAPACITY = 1000000
+MEMORY_CAPACITY = 100000
 TARGET_NET_UPDATE = 1000
 
 EPS_START = 1
@@ -60,7 +61,7 @@ class DeepQNetwork:
         self.q_net.train()
         self.target_net.train()
         frame_skip = FrameSkipper(self.frame_skipping)
-        for _ in range(episodes):
+        for _ in tqdm(range(episodes)):
             frame_skip.reset()
             observation, _ = self.env.reset()
             if self.transforms is not None:
