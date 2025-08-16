@@ -1,5 +1,6 @@
 import gymnasium as gym
 import ale_py
+from ale_py.vector_env import AtariVectorEnv
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
@@ -15,8 +16,8 @@ from torchvision.transforms import v2
 import dqn
 
 # Hyperparameters
-NUM_CONTEXT_FRAMES = 4   # The number of frames to look at per pass
 FRAME_SKIPPING = 4       # Select actions every k frames instead of every frame
+ACTION_SPACE = 4         # TODO: Change this to read from the environment instead
 
 class ConvNet(nn.Module):
     def __init__(self, num_frames, actions):
@@ -51,9 +52,9 @@ gym.register_envs(ale_py)
 transforms = v2.Compose([
     v2.ToImage(),
     v2.ToDtype(torch.float32, scale=True),
-    v2.Grayscale(),
-    v2.Resize((110, 84)),
-    lambda img: v2.functional.crop(img, 16, 0, 84, 84) # Crop down to 84 by 84 playing area
+    # v2.Grayscale(),
+    # v2.Resize((110, 84)),
+    # lambda img: v2.functional.crop(img, 16, 0, 84, 84) # Crop down to 84 by 84 playing area
 ])
 
 # Test transforms
@@ -81,14 +82,24 @@ args = parser.parse_args()
 if args.train:
     print("Beginning training.")
     start = time.time()
-    train_env = gym.make(args.environment)
-    network = dqn.DeepQNetwork(train_env, device, ConvNet, 4, train_env.action_space.n, 4)
+    envs = AtariVectorEnv(
+        game=args.environment,
+        num_envs=1,
+        batch_size=1,
+        frameskip=4,
+        stack_num=4,
+
+        img_height=84,
+        img_width=84,
+        grayscale=True,
+    )
+    network = dqn.DeepQNetwork(envs, device, ConvNet, 4, ACTION_SPACE)
     network.frame_skipping = 4
     network.transforms = transforms
 
     network.train(int(args.train[0]))
 
-    train_env.close()
+    envs.close()
     torch.save(network.q_net.state_dict(), args.train[1])
     end = time.time()
     print(f"Training complete after {int((end - start) // 60)} mins {round((end - start) % 60, 2)} secs.")
