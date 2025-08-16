@@ -93,7 +93,7 @@ if args.train:
         img_width=84,
         grayscale=True,
     )
-    network = dqn.DeepQNetwork(envs, device, ConvNet, 4, ACTION_SPACE)
+    network = dqn.DeepQNetwork(envs, device, ConvNet, 4, ACTION_SPACE, vectorized=True)
     network.frame_skipping = 4
     network.transforms = transforms
 

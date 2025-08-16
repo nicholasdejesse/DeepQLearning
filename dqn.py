@@ -40,7 +40,7 @@ class Memory:
         return len(self.mem)
 
 class DeepQNetwork:
-    def __init__(self, env, device, network, net_input, net_output):
+    def __init__(self, env, device, network, net_input, net_output, vectorized = False):
         self.env = env
         self.device = device
         self.q_net = network(net_input, net_output).to(device)
@@ -50,7 +50,8 @@ class DeepQNetwork:
         self.memory = Memory(MEMORY_CAPACITY)
 
         self.transforms = None                # Transforms to apply to observation before storing (used in Atari environments)
-
+        self.vectorized = vectorized
+        
         self.frames_trained = 0
         self.rewards = []
 
@@ -60,9 +61,12 @@ class DeepQNetwork:
         for _ in tqdm(range(episodes)):
             observation, _ = self.env.reset()
             if self.transforms is not None:
-                print(observation.shape)
-                # TODO: Split this up by env
-                observation = self.transforms(observation)
+                if self.vectorized:
+                    for img in observation:
+                        img = self.transforms(img)
+                    observation = torch.tensor(observation, device=self.device)
+                else:
+                    observation = self.transforms(observation)
             else:
                 observation = torch.tensor(observation, device=self.device)
 
@@ -70,22 +74,27 @@ class DeepQNetwork:
             reward_this_episode = 0
 
             while not terminated and not truncated:
-                action = self.__select_action(observation).to(self.device)
+                action = self.__select_action(observation)
 
                 next_observation, reward, terminated, truncated, _ = self.env.step(action)
                 if self.transforms is not None:
-                    next_observation = self.transforms(next_observation)
+                    if self.vectorized:
+                        for img in next_observation:
+                            img = self.transforms(img)
+                        next_observation = torch.tensor(next_observation, device=self.device)
+                    else:
+                        next_observation = self.transforms(next_observation)
 
                 reward_this_episode += reward
                 if terminated or truncated:
                     self.rewards.append(reward_this_episode)
                     reward_this_episode = 0
 
-                action = torch.tensor([action], device=self.device)
-                reward = torch.tensor([reward], device=self.device)
+                action = torch.tensor(np.array(action), device=self.device)
+                reward = torch.tensor(np.array(reward), device=self.device)
                 if self.transforms is None:
                     next_observation = torch.tensor(next_observation, device=self.device)
-                done = torch.tensor([terminated], device=self.device, dtype=torch.bool)
+                done = torch.tensor(np.array(terminated), device=self.device, dtype=torch.bool)
 
                 self.memory.append(observation, action, reward, next_observation, done)
 
@@ -108,6 +117,7 @@ class DeepQNetwork:
         next_states = torch.stack(batch.next_state).squeeze().to(self.device)
         is_done = torch.stack(batch.done).squeeze()
 
+        print(states)
         # print(f"State shape: {self.q_net(states).shape}")
         state_action_output = self.q_net(states).gather(1, actions)
 
@@ -131,6 +141,9 @@ class DeepQNetwork:
             with torch.no_grad():
                 # # print(observation)
                 # print(self.q_net(observation).shape)
+                if self.vectorized:
+                    print(observation)
+                    return np.array(torch.argmax(self.q_net(observation)))
                 return torch.argmax(self.q_net(observation))
 
     # Only used during testing once training is complete

@@ -62,7 +62,7 @@ if args.train:
 
 if args.load:
     human_env = gym.make(args.environment, render_mode="human")
-    network = dqn.DeepQNetwork(human_env, device, LinearRelu, train_env.observation_space.shape[0], train_env.action_space.n)
+    network = dqn.DeepQNetwork(human_env, device, LinearRelu, human_env.observation_space.shape[0], human_env.action_space.n)
     network.q_net.eval()
     network.q_net.load_state_dict(torch.load(args.load, weights_only=True))
     for _ in range(30):
