@@ -62,9 +62,8 @@ class DeepQNetwork:
             observation, _ = self.env.reset()
             if self.transforms is not None:
                 if self.vectorized:
-                    for img in observation:
-                        img = self.transforms(img)
-                    observation = torch.tensor(observation, device=self.device)
+                    self.__transform_vector_observation(observation)
+                    observation = torch.tensor(observation, device=self.device).float()
                 else:
                     observation = self.transforms(observation)
             else:
@@ -79,9 +78,8 @@ class DeepQNetwork:
                 next_observation, reward, terminated, truncated, _ = self.env.step(action)
                 if self.transforms is not None:
                     if self.vectorized:
-                        for img in next_observation:
-                            img = self.transforms(img)
-                        next_observation = torch.tensor(next_observation, device=self.device)
+                        self.__transform_vector_observation(next_observation)
+                        next_observation = torch.tensor(next_observation, device=self.device).float()
                     else:
                         next_observation = self.transforms(next_observation)
 
@@ -111,13 +109,12 @@ class DeepQNetwork:
             return
         batch = Transition(*zip(*self.memory.sample(BATCH_SIZE)))
 
-        states = torch.stack(batch.state).squeeze().to(self.device)
+        states = torch.stack(batch.state).squeeze().to(self.device).float()
         actions = torch.stack(batch.action)
         rewards = torch.stack(batch.reward).squeeze()
-        next_states = torch.stack(batch.next_state).squeeze().to(self.device)
+        next_states = torch.stack(batch.next_state).squeeze().to(self.device).float()
         is_done = torch.stack(batch.done).squeeze()
 
-        print(states)
         # print(f"State shape: {self.q_net(states).shape}")
         state_action_output = self.q_net(states).gather(1, actions)
 
@@ -136,16 +133,23 @@ class DeepQNetwork:
         r = random.random()
         eps = EPS_END + (EPS_START - EPS_END) * math.exp(-1 * self.frames_trained / EPS_DECAY)
         if r < eps:
-            return self.env.action_space.sample()
+            # print(f"Random: {self.env.action_space.sample()}")
+            return np.array(self.env.action_space.sample())
         else:
             with torch.no_grad():
                 # # print(observation)
                 # print(self.q_net(observation).shape)
                 if self.vectorized:
-                    print(observation)
-                    return np.array(torch.argmax(self.q_net(observation)))
+                    # print(f"Not random: {self.q_net(observation).argmax().cpu().numpy()}")
+                    return self.q_net(observation).detach().cpu().argmax().unsqueeze(0).numpy()
                 return torch.argmax(self.q_net(observation))
 
+    def __transform_vector_observation(self, observation):
+        for env in observation:
+            for stack in observation:
+                for img in stack:
+                    img = self.transforms(img)
+        
     # Only used during testing once training is complete
     def evaluate(self, observation):
         return torch.argmax(self.q_net(observation)).item()

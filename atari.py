@@ -84,7 +84,7 @@ if args.train:
     start = time.time()
     envs = AtariVectorEnv(
         game=args.environment,
-        num_envs=1,
+        num_envs=4,
         batch_size=1,
         frameskip=4,
         stack_num=4,
