@@ -84,20 +84,21 @@ if args.train:
     start = time.time()
     envs = AtariVectorEnv(
         game=args.environment,
-        num_envs=4,
-        batch_size=1,
+        num_envs=8,
+        batch_size=32,
+
         frameskip=4,
         stack_num=4,
-
         img_height=84,
         img_width=84,
         grayscale=True,
+        autoreset_mode=gym.vector.AutoresetMode.NEXT_STEP
     )
     network = dqn.DeepQNetwork(envs, device, ConvNet, 4, ACTION_SPACE, vectorized=True)
     network.frame_skipping = 4
     network.transforms = transforms
 
-    network.train(int(args.train[0]))
+    network.train_vector(int(args.train[0]))
 
     envs.close()
     torch.save(network.q_net.state_dict(), args.train[1])

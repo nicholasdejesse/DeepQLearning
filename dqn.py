@@ -41,7 +41,7 @@ class Memory:
 
 class DeepQNetwork:
     def __init__(self, env, device, network, net_input, net_output, vectorized = False):
-        self.env = env
+        self.envs = env
         self.device = device
         self.q_net = network(net_input, net_output).to(device)
         self.target_net = network(net_input, net_output).to(device)
@@ -55,54 +55,57 @@ class DeepQNetwork:
         self.frames_trained = 0
         self.rewards = []
 
-    def train(self, episodes):
+    def train_vector(self, episodes):
         self.q_net.train()
         self.target_net.train()
-        for _ in tqdm(range(episodes)):
-            observation, _ = self.env.reset()
+        episode_count = 0
+
+        observations, _ = self.envs.reset()
+        if self.transforms is not None:
+            self.__transform_vector_observation(observations)
+            observations = torch.tensor(observations, device=self.device).float()
+        else:
+            observations = torch.tensor(observations, device=self.device)
+
+        rewards_per_episode = np.zeros(self.envs.num_envs)
+        episode_started = np.zeros(self.envs.num_envs, dtype=bool)
+
+        pbar = tqdm(total=episodes)
+        while episode_count < episodes:
+            actions = self.__select_action(observations)
+
+            next_observations, rewards, terminations, truncations, _ = self.envs.step(actions)
+
             if self.transforms is not None:
-                if self.vectorized:
-                    self.__transform_vector_observation(observation)
-                    observation = torch.tensor(observation, device=self.device).float()
+                self.__transform_vector_observation(next_observations)
+
+            # rewards_per_episode += rewards
+            # if terminations or truncations:
+            #     self.rewards.append(rewards_per_episode)
+            #     rewards_per_episode = 0
+            next_observations = torch.tensor(next_observations, device=self.device).float()
+            actions = torch.tensor(np.array(actions), device=self.device)
+            rewards = torch.tensor(np.array(rewards), device=self.device)
+            if self.transforms is None:
+                next_observations = torch.tensor(next_observations, device=self.device)
+
+            for i in range(self.envs.env_num):
+                if episode_started[i]:  # True if this is the first frame of the episode
+                    episode_count += 1
+                    pbar.update(1)
                 else:
-                    observation = self.transforms(observation)
-            else:
-                observation = torch.tensor(observation, device=self.device)
+                    self.memory.append(observations[i], actions[i], rewards[i], next_observations[i], terminations[i])
 
-            terminated, truncated = False, False
-            reward_this_episode = 0
+            observations = next_observations
 
-            while not terminated and not truncated:
-                action = self.__select_action(observation)
+            self.__optimize()
 
-                next_observation, reward, terminated, truncated, _ = self.env.step(action)
-                if self.transforms is not None:
-                    if self.vectorized:
-                        self.__transform_vector_observation(next_observation)
-                        next_observation = torch.tensor(next_observation, device=self.device).float()
-                    else:
-                        next_observation = self.transforms(next_observation)
+            episode_started = np.logical_or(terminations, truncations)
 
-                reward_this_episode += reward
-                if terminated or truncated:
-                    self.rewards.append(reward_this_episode)
-                    reward_this_episode = 0
-
-                action = torch.tensor(np.array(action), device=self.device)
-                reward = torch.tensor(np.array(reward), device=self.device)
-                if self.transforms is None:
-                    next_observation = torch.tensor(next_observation, device=self.device)
-                done = torch.tensor(np.array(terminated), device=self.device, dtype=torch.bool)
-
-                self.memory.append(observation, action, reward, next_observation, done)
-
-                observation = next_observation
-
-                self.__optimize()
-
-                self.frames_trained += 1
-                if self.frames_trained % TARGET_NET_UPDATE == 0:
-                    self.target_net.load_state_dict(self.q_net.state_dict())
+            self.frames_trained += 1
+            if self.frames_trained % TARGET_NET_UPDATE == 0:
+                self.target_net.load_state_dict(self.q_net.state_dict())
+        pbar.close()
 
     def __optimize(self):
         if len(self.memory) < BATCH_SIZE:
@@ -134,7 +137,7 @@ class DeepQNetwork:
         eps = EPS_END + (EPS_START - EPS_END) * math.exp(-1 * self.frames_trained / EPS_DECAY)
         if r < eps:
             # print(f"Random: {self.env.action_space.sample()}")
-            return np.array(self.env.action_space.sample())
+            return np.array(self.envs.action_space.sample())
         else:
             with torch.no_grad():
                 # # print(observation)
