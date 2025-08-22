@@ -15,6 +15,13 @@ import dqn
 
 # Hyperparameters
 NUM_STACK_FRAMES = 4
+MEMORY_CAPACITY = 1_000_000     # Max number of experiences to store
+MIN_MEMORY_TO_TRAIN = 50_000    # Minimum required experiences before sampling and training from memory
+TARGET_NET_UPDATE = 1_000
+
+EPS_START = 1
+EPS_END = 0.1
+EPS_FRAME_TO_END = 1_000_000
 
 class ConvNet(nn.Module):
     def __init__(self, num_frames, actions):
@@ -81,9 +88,23 @@ if __name__ == "__main__":
             grayscale=True,
             autoreset_mode=gym.vector.AutoresetMode.NEXT_STEP
         )
-        network = dqn.DeepQNetwork(envs, device, ConvNet, NUM_STACK_FRAMES, envs.single_action_space.n, vectorized=True)
+        network = dqn.DeepQNetwork(
+            env=envs,
+            device=device,
+            network=ConvNet,
+            net_input=NUM_STACK_FRAMES,
+            net_output=envs.single_action_space.n,
+            vectorized=True,
+
+            memory_capacity = 1_000_000,
+            min_memory_to_train = 50_000,
+            target_net_update = 1_000,
+
+            eps_start = 1,
+            eps_end = 0.1,
+            eps_frame_to_end = 1_000_000,
+        )
         
-        network.frame_skipping = 4
         network.transforms = transforms
 
         network.train_vector(int(args.train[0]))
@@ -124,7 +145,22 @@ if __name__ == "__main__":
                 name_prefix="video-"
             )
 
-        network = dqn.DeepQNetwork(env, device, ConvNet, NUM_STACK_FRAMES, env.action_space.n)
+        network = dqn.DeepQNetwork(
+            env=env,
+            device=device,
+            network=ConvNet,
+            net_input=NUM_STACK_FRAMES,
+            net_output=env.single_action_space.n,
+            vectorized=True,
+
+            memory_capacity = 1_000_000,
+            min_memory_to_train = 50_000,
+            target_net_update = 10_000,
+
+            eps_start = 1,
+            eps_end = 0.1,
+            eps_frame_to_end = 200_000,
+        )
         network.q_net.eval()
         network.q_net.load_state_dict(torch.load(args.load if args.load is not None else args.record, weights_only=True))
 

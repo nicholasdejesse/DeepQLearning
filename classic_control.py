@@ -8,6 +8,15 @@ import torch.nn as nn
 
 import dqn
 
+# Hyperparameters
+MEMORY_CAPACITY = 1_000     # Max number of experiences to store
+MIN_MEMORY_TO_TRAIN = 500    # Minimum required experiences before sampling and training from memory
+TARGET_NET_UPDATE = 100
+
+EPS_START = 1
+EPS_END = 0.1
+EPS_FRAME_TO_END = 10_000
+
 class LinearRelu(nn.Module):
     def __init__(self, input_features, actions):
         super().__init__()
@@ -46,13 +55,28 @@ if args.train:
     print("Beginning training.")
     start = time.time()
     train_env = gym.make(args.environment)
-    network = dqn.DeepQNetwork(train_env, device, LinearRelu, train_env.observation_space.shape[0], train_env.action_space.n)
-    network.num_context_observations = 1
+    network = dqn.DeepQNetwork(
+        env=train_env,
+        device=device,
+        network=LinearRelu,
+        net_input=train_env.observation_space.shape[0],
+        net_output=train_env.action_space.n,
+        vectorized=False,
+
+        memory_capacity = 10_000,
+        min_memory_to_train = 100,
+        target_net_update = 100,
+
+        eps_start = 1,
+        eps_end = 0.01,
+        eps_frame_to_end = 20_000,
+    )
     network.train(int(args.train[0]))
     train_env.close()
     torch.save(network.q_net.state_dict(), args.train[1])
     end = time.time()
     print(f"Training complete after {int((end - start) // 60)} mins {round((end - start) % 60, 2)} secs.")
+    print(f"Trained for {network.frames_trained} frames.")
 
     plt.plot(network.rewards)
     plt.title("Rewards over episodes")

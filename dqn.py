@@ -17,13 +17,6 @@ from torchvision.transforms import v2
 BATCH_SIZE = 32
 LEARNING_RATE = 0.0001
 DISCOUNT = 0.99
-MEMORY_CAPACITY = 1_000_000     # Max number of experiences to store
-MIN_MEMORY_TO_TRAIN = 50_000    # Minimum required experiences before sampling and training from memory
-TARGET_NET_UPDATE = 1_000
-
-EPS_START = 1
-EPS_END = 0.1
-EPS_FRAME_TO_END = 1_000_000
 
 Transition = namedtuple("Transition", ("state", "action", "reward", "next_state", "done"))
 
@@ -41,20 +34,69 @@ class Memory:
         return len(self.mem)
 
 class DeepQNetwork:
-    def __init__(self, env, device, network, net_input, net_output, vectorized = False):
+    def __init__(self, env, device, network, net_input, net_output,
+            vectorized = False,
+            memory_capacity = 10_000,
+            min_memory_to_train = 100,
+            target_net_update = 100,
+            eps_start = 1,
+            eps_end = 0.01,
+            eps_frame_to_end = 10_000
+        ):
         self.envs = env
         self.device = device
         self.q_net = network(net_input, net_output).to(device)
         self.target_net = network(net_input, net_output).to(device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.RMSprop(self.q_net.parameters(), lr=LEARNING_RATE)
-        self.memory = Memory(MEMORY_CAPACITY)
+
+        self.memory_capacity = memory_capacity
+        self.min_memory_to_train = min_memory_to_train
+        self.target_net_update = target_net_update
+        self.eps_start = eps_start
+        self.eps_end = eps_end
+        self.eps_frame_to_end = eps_frame_to_end
+
+        self.memory = Memory(memory_capacity)
 
         self.transforms = None                # Transforms to apply to observation before storing (used in Atari environments)
         self.vectorized = vectorized
         
         self.frames_trained = 0
         self.rewards = []
+
+    def train(self, episodes):
+        self.q_net.train()
+        self.target_net.train()
+        for _ in tqdm(range(episodes)):
+            observation, _ = self.envs.reset()
+            observation = torch.tensor(observation, device=self.device)
+            terminated, truncated = False, False
+            reward_this_episode = 0
+
+            while not terminated and not truncated:
+                action = self.__select_action(observation).item()
+                next_observation, reward, terminated, truncated, _ = self.envs.step(action)
+
+                reward_this_episode += reward
+                if terminated or truncated:
+                    self.rewards.append(reward_this_episode)
+                    reward_this_episode = 0
+
+                action = torch.tensor([action], device=self.device)
+                reward = torch.tensor([reward], device=self.device)
+                next_observation = torch.tensor(next_observation, device=self.device)
+                done = torch.tensor([terminated], device=self.device, dtype=torch.bool)
+
+                self.memory.append(observation, action, reward, next_observation, done)
+
+                observation = next_observation
+
+                self.__optimize()
+
+                self.frames_trained += 1
+                if self.frames_trained % self.target_net_update == 0:
+                    self.target_net.load_state_dict(self.q_net.state_dict())
 
     def train_vector(self, episodes):
         self.q_net.train()
@@ -87,8 +129,8 @@ class DeepQNetwork:
                     rewards_per_episode[i] = 0
 
             next_observations = torch.tensor(next_observations, device=self.device)
-            actions = torch.tensor(np.array(actions), device=self.device)
-            rewards = torch.tensor(np.array(rewards), device=self.device)
+            # actions = torch.tensor(actions, device=self.device)
+            rewards = torch.tensor(rewards, device=self.device)
             terminations = terminations.tolist()
             if self.transforms is None:
                 next_observations = torch.tensor(next_observations, device=self.device)
@@ -98,8 +140,7 @@ class DeepQNetwork:
                     episode_count += 1
                     pbar.update(1)
                 else:
-                    # print(type(terminations[i]))
-                    self.memory.append(observations[i], actions[i], rewards[i], next_observations[i], torch.tensor(terminations[i], device=self.device))
+                    self.memory.append(observations[i], torch.tensor([actions[i]], device=self.device), rewards[i], next_observations[i], torch.tensor(terminations[i], device=self.device))
 
             observations = next_observations
 
@@ -108,17 +149,17 @@ class DeepQNetwork:
             episode_started = np.logical_or(terminations, truncations)
 
             self.frames_trained += 1
-            if self.frames_trained % TARGET_NET_UPDATE == 0:
+            if self.frames_trained % self.target_net_update == 0:
                 self.target_net.load_state_dict(self.q_net.state_dict())
         pbar.close()
 
     def __optimize(self):
-        if len(self.memory) < MIN_MEMORY_TO_TRAIN:
+        if len(self.memory) < self.min_memory_to_train:
             return
         batch = Transition(*zip(*self.memory.sample(BATCH_SIZE)))
 
         states = torch.stack(batch.state).squeeze().to(self.device).float()
-        actions = torch.stack(batch.action).unsqueeze(1)
+        actions = torch.stack(batch.action, 0)
         rewards = torch.stack(batch.reward).squeeze()
         next_states = torch.stack(batch.next_state).squeeze().to(self.device).float()
         is_done = torch.stack(batch.done).squeeze()
@@ -132,7 +173,7 @@ class DeepQNetwork:
         
         next_state_action_max = rewards + (~is_done) * DISCOUNT * next_state_action_max
                 
-        loss = nn.HuberLoss()(state_action_output, next_state_action_max.unsqueeze(1))
+        loss = nn.MSELoss()(state_action_output, next_state_action_max.unsqueeze(1))
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -160,7 +201,7 @@ class DeepQNetwork:
                     img = self.transforms(img)
     
     def epsilon_schedule(self, frame):
-        return max(EPS_END, EPS_START - frame * (EPS_START - EPS_END) / EPS_FRAME_TO_END)
+        return max(self.eps_end, self.eps_start - frame * (self.eps_start - self.eps_end) / self.eps_frame_to_end)
 
     # Only used during testing once training is complete
     def evaluate(self, observation):
