@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument("environment", help="The name of the environment to use.")
 parser.add_argument("--train", nargs=2, help="Flag to train the model. Specify the number of episodes to train for and the filename of the model. Will render a graph of rewards after training completes.")
-parser.add_argument("--load", help="Loads the model at the given filepath and renders the environment to use it on for 30 episodes.")
+parser.add_argument("--load", help="Loads the model at the given filepath and renders the environment to use it on for 10 episodes.")
 args = parser.parse_args()
 
 # Graph epsilon decay
@@ -65,7 +65,7 @@ if args.load:
     network = dqn.DeepQNetwork(human_env, device, LinearRelu, human_env.observation_space.shape[0], human_env.action_space.n)
     network.q_net.eval()
     network.q_net.load_state_dict(torch.load(args.load, weights_only=True))
-    for _ in range(30):
+    for _ in range(10):
         observation, _ = human_env.reset()
 
         terminated, truncated = False, False

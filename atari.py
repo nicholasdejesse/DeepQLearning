@@ -2,12 +2,9 @@ import gymnasium as gym
 import ale_py
 from ale_py.vector_env import AtariVectorEnv
 import matplotlib.pyplot as plt
-import numpy as np
 import argparse
 import time
-from collections import deque
-from dqn import FrameSkipper
-from gymnasium.wrappers import ResizeObservation, GrayscaleObservation
+from gymnasium.wrappers import FrameStackObservation, AtariPreprocessing, RecordVideo
 
 import torch
 import torch.nn as nn
@@ -17,28 +14,15 @@ from torchvision.transforms import v2
 import dqn
 
 # Hyperparameters
-FRAME_SKIPPING = 4       # Select actions every k frames instead of every frame
-NUM_CONTEXT_FRAMES = 4
-ACTION_SPACE = 4         # TODO: Change this to read from the environment instead
+NUM_STACK_FRAMES = 4
 
 class ConvNet(nn.Module):
     def __init__(self, num_frames, actions):
         super().__init__()
         self.conv1 = nn.Conv2d(num_frames, 16, kernel_size=8, stride=4)
         self.conv2 = nn.Conv2d(16, 32, kernel_size=4, stride=2)
-        self.flatten = nn.Flatten()
         self.fc1 = nn.Linear(32 * 81, 256)
         self.fc2 = nn.Linear(256, actions)
-        # self.conv_stack = nn.Sequential(
-        #     nn.Conv2d(num_frames, 16, kernel_size=8, stride=4),
-        #     nn.ReLU(),
-        #     nn.Conv2d(16, 32, kernel_size=4, stride=2),
-        #     nn.ReLU(),
-        #     nn.Flatten(),
-        #     nn.Linear(81, 256),
-        #     nn.ReLU(),
-        #     nn.Linear(256, actions)
-        # )
     
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -54,7 +38,7 @@ if __name__ == "__main__":
     # Preprocessing steps to do on observations
     transforms = v2.Compose([
         v2.ToImage(),
-        v2.ToDtype(torch.float32, scale=True),
+        v2.ToDtype(torch.uint8, scale=True),
         # v2.Grayscale(),
         # v2.Resize((110, 84)),
         # lambda img: v2.functional.crop(img, 16, 0, 84, 84) # Crop down to 84 by 84 playing area
@@ -79,7 +63,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("environment", help="The name of the environment to use.")
     parser.add_argument("--train", nargs=2, help="Flag to train the model. Specify the number of episodes to train for and the filename of the model. Will render a graph of rewards after training completes.")
-    parser.add_argument("--load", help="Loads the model at the given filepath and renders the environment to use it on for 30 episodes.")
+    parser.add_argument("--load", help="Loads the model at the given filepath and renders the environment to use it on for 10 episodes.")
+    parser.add_argument("--record", help="Loads the model at the given filepath and records a video of one episode.")
     args = parser.parse_args()
 
     if args.train:
@@ -90,13 +75,14 @@ if __name__ == "__main__":
             num_envs=8,
 
             frameskip=4,
-            stack_num=NUM_CONTEXT_FRAMES,
+            stack_num=NUM_STACK_FRAMES,
             img_height=84,
             img_width=84,
             grayscale=True,
             autoreset_mode=gym.vector.AutoresetMode.NEXT_STEP
         )
-        network = dqn.DeepQNetwork(envs, device, ConvNet, 4, ACTION_SPACE, vectorized=True)
+        network = dqn.DeepQNetwork(envs, device, ConvNet, NUM_STACK_FRAMES, envs.single_action_space.n, vectorized=True)
+        
         network.frame_skipping = 4
         network.transforms = transforms
 
@@ -114,34 +100,54 @@ if __name__ == "__main__":
         plt.ylabel("Reward")
         plt.show()
 
-    if args.load:
-        human_env = gym.make(args.environment, render_mode="human")
-        human_env = GrayscaleObservation(ResizeObservation(human_env, (84, 84)))
+    elif args.load or args.record:
+        if args.load:
+            num_episodes = 10
+            env = FrameStackObservation(
+                AtariPreprocessing(
+                    gym.make(args.environment, render_mode="human", frameskip=1),
+                ),
+                stack_size=NUM_STACK_FRAMES,
+                padding_type="zero"
+            )
+        else:
+            num_episodes = 1
+            env = RecordVideo(
+                FrameStackObservation(
+                    AtariPreprocessing(
+                        gym.make(args.environment, render_mode="rgb_array", frameskip=1),
+                    ),
+                    stack_size=NUM_STACK_FRAMES,
+                    padding_type="zero"
+                ),
+                video_folder="videos",
+                name_prefix="video-"
+            )
 
-        network = dqn.DeepQNetwork(human_env, device, ConvNet, 4, human_env.action_space.n, 4)
-        # network.frame_skipping = 4
+        network = dqn.DeepQNetwork(env, device, ConvNet, NUM_STACK_FRAMES, env.action_space.n)
         network.q_net.eval()
-        network.q_net.load_state_dict(torch.load(args.load, weights_only=True))
-        context = deque(maxlen=NUM_CONTEXT_FRAMES)
-        # frame_skipper = dqn.FrameSkipper(FRAME_SKIPPING)
-        for _ in range(30):
-            count = 0
-            observation, _ = human_env.reset()
-            observation = transforms(observation)
-            context.clear()
-            # frame_skipper.reset()
-            for _ in range(NUM_CONTEXT_FRAMES):
-                context.append(transforms(observation))     # Fill queue with initial observation
+        network.q_net.load_state_dict(torch.load(args.load if args.load is not None else args.record, weights_only=True))
 
+        for e in range(num_episodes):
+            total_episode_reward = 0
+            observation, _ = env.reset()
+            for _ in observation:
+                for stack in observation:
+                    for img in stack:
+                        img = transforms(img)
+            observation = torch.tensor(observation, dtype=torch.float)
             terminated, truncated = False, False
             while True:
-                action = network.evaluate(torch.stack(tuple(context)).squeeze().to(device=device))
-                print(action)
-                # action = frame_skipper.get_action(action)
-                observation, reward, terminated, truncated, _ = human_env.step(action)
-                observation = transforms(observation)
-                context.append(transforms(observation))
+                action = network.evaluate(observation.to(device=device))
+                observation, reward, terminated, truncated, _ = env.step(action)
+                total_episode_reward += reward
+                for _ in observation:
+                    for stack in observation:
+                        for img in stack:
+                            img = transforms(img)
+                observation = torch.tensor(observation, dtype=torch.float)
+                            
                 if terminated or truncated:
+                    print(f"Episode {e} finished with total reward of {total_episode_reward}")
                     break
-
-        human_env.close()
+        env.close()

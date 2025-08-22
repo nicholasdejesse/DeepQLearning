@@ -17,12 +17,13 @@ from torchvision.transforms import v2
 BATCH_SIZE = 32
 LEARNING_RATE = 0.0001
 DISCOUNT = 0.99
-MEMORY_CAPACITY = 100000
-TARGET_NET_UPDATE = 1000
+MEMORY_CAPACITY = 1_000_000     # Max number of experiences to store
+MIN_MEMORY_TO_TRAIN = 50_000    # Minimum required experiences before sampling and training from memory
+TARGET_NET_UPDATE = 1_000
 
 EPS_START = 1
 EPS_END = 0.1
-EPS_DECAY = 2500
+EPS_FRAME_TO_END = 1_000_000
 
 Transition = namedtuple("Transition", ("state", "action", "reward", "next_state", "done"))
 
@@ -46,7 +47,7 @@ class DeepQNetwork:
         self.q_net = network(net_input, net_output).to(device)
         self.target_net = network(net_input, net_output).to(device)
         self.target_net.load_state_dict(self.q_net.state_dict())
-        self.optimizer = optim.Adam(self.q_net.parameters(), lr=LEARNING_RATE)
+        self.optimizer = optim.RMSprop(self.q_net.parameters(), lr=LEARNING_RATE)
         self.memory = Memory(MEMORY_CAPACITY)
 
         self.transforms = None                # Transforms to apply to observation before storing (used in Atari environments)
@@ -63,7 +64,7 @@ class DeepQNetwork:
         observations, _ = self.envs.reset()
         if self.transforms is not None:
             self.__transform_vector_observation(observations)
-            observations = torch.tensor(observations, device=self.device).float()
+            observations = torch.tensor(observations, device=self.device)
         else:
             observations = torch.tensor(observations, device=self.device)
 
@@ -85,7 +86,7 @@ class DeepQNetwork:
                     self.rewards.append(rewards_per_episode[i])
                     rewards_per_episode[i] = 0
 
-            next_observations = torch.tensor(next_observations, device=self.device).float()
+            next_observations = torch.tensor(next_observations, device=self.device)
             actions = torch.tensor(np.array(actions), device=self.device)
             rewards = torch.tensor(np.array(rewards), device=self.device)
             terminations = terminations.tolist()
@@ -112,7 +113,7 @@ class DeepQNetwork:
         pbar.close()
 
     def __optimize(self):
-        if len(self.memory) < BATCH_SIZE:
+        if len(self.memory) < MIN_MEMORY_TO_TRAIN:
             return
         batch = Transition(*zip(*self.memory.sample(BATCH_SIZE)))
 
@@ -131,7 +132,7 @@ class DeepQNetwork:
         
         next_state_action_max = rewards + (~is_done) * DISCOUNT * next_state_action_max
                 
-        loss = nn.MSELoss()(state_action_output, next_state_action_max.unsqueeze(1))
+        loss = nn.HuberLoss()(state_action_output, next_state_action_max.unsqueeze(1))
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -139,7 +140,7 @@ class DeepQNetwork:
                 
     def __select_action(self, observation):
         r = random.random()
-        eps = EPS_END + (EPS_START - EPS_END) * math.exp(-1 * self.frames_trained / EPS_DECAY)
+        eps = self.epsilon_schedule(self.frames_trained)
         if r < eps:
             # print(f"Random: {self.env.action_space.sample()}")
             return np.array(self.envs.action_space.sample())
@@ -149,7 +150,7 @@ class DeepQNetwork:
                 # print(self.q_net(observation).shape)
                 if self.vectorized:
                     # print(f"Not random: {self.q_net(observation).argmax().cpu().numpy()}")
-                    return self.q_net(observation).detach().cpu().argmax(axis=1).numpy()
+                    return self.q_net(observation.float()).detach().cpu().argmax(axis=1).numpy()
                 return torch.argmax(self.q_net(observation))
 
     def __transform_vector_observation(self, observation):
@@ -157,28 +158,10 @@ class DeepQNetwork:
             for stack in observation:
                 for img in stack:
                     img = self.transforms(img)
-        
+    
+    def epsilon_schedule(self, frame):
+        return max(EPS_END, EPS_START - frame * (EPS_START - EPS_END) / EPS_FRAME_TO_END)
+
     # Only used during testing once training is complete
     def evaluate(self, observation):
         return torch.argmax(self.q_net(observation)).item()
-    
-class FrameSkipper:
-    def __init__(self, k):
-        self.k = k
-        self.count = 0
-        self.previous_action = None
-
-    def reset(self):
-        self.count = 0
-        self.previous_action = None
-
-    # Returns either the action passed in or the previous action depending on the count
-    def get_action(self, action):
-        if self.count % self.k == 0:
-            self.previous_action = action
-            self.count = 0
-            res = action
-        else:
-            res = self.previous_action
-        self.count += 1
-        return res
