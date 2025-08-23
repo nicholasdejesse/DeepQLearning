@@ -150,7 +150,7 @@ if __name__ == "__main__":
             device=device,
             network=ConvNet,
             net_input=NUM_STACK_FRAMES,
-            net_output=env.single_action_space.n,
+            net_output=env.action_space.n,
             vectorized=True,
 
             memory_capacity = 1_000_000,
