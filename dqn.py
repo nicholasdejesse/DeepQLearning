@@ -3,15 +3,12 @@
 from collections import namedtuple
 from collections import deque
 import random
-import math
-import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchvision.transforms import v2
 
 # Hyperparameters
 BATCH_SIZE = 32
@@ -41,8 +38,7 @@ class DeepQNetwork:
             target_net_update = 100,
             eps_start = 1,
             eps_end = 0.01,
-            eps_frame_to_end = 10_000
-        ):
+            eps_frame_to_end = 10_000):
         self.envs = env
         self.device = device
         self.q_net = network(net_input, net_output).to(device)
@@ -106,11 +102,11 @@ class DeepQNetwork:
         observations, _ = self.envs.reset()
         if self.transforms is not None:
             self.__transform_vector_observation(observations)
-            observations = torch.tensor(observations, device=self.device)
-        else:
-            observations = torch.tensor(observations, device=self.device)
+        observations = torch.tensor(observations, device=self.device)
 
+        # Used to display reward graph after training
         rewards_per_episode = np.zeros(self.envs.num_envs)
+
         episode_started = np.zeros(self.envs.num_envs, dtype=bool)
 
         pbar = tqdm(total=episodes)
@@ -140,6 +136,7 @@ class DeepQNetwork:
                     episode_count += 1
                     pbar.update(1)
                 else:
+                    # We only store memories if the transition isn't reseting the environment (i.e. from last frame of episode n-1 to first frame of episode n)
                     self.memory.append(observations[i], torch.tensor([actions[i]], device=self.device), rewards[i], next_observations[i], torch.tensor(terminations[i], device=self.device))
 
             observations = next_observations
@@ -164,8 +161,6 @@ class DeepQNetwork:
         next_states = torch.stack(batch.next_state).squeeze().to(self.device).float()
         is_done = torch.stack(batch.done).squeeze()
 
-        # print(f"Input shape: {self.q_net(states).shape}")
-        # print(f"Index shape: {actions.shape}")
         state_action_output = self.q_net(states).gather(1, actions)
 
         with torch.no_grad():
@@ -183,26 +178,24 @@ class DeepQNetwork:
         r = random.random()
         eps = self.epsilon_schedule(self.frames_trained)
         if r < eps:
-            # print(f"Random: {self.env.action_space.sample()}")
             return np.array(self.envs.action_space.sample())
         else:
             with torch.no_grad():
-                # # print(observation)
-                # print(self.q_net(observation).shape)
                 if self.vectorized:
-                    # print(f"Not random: {self.q_net(observation).argmax().cpu().numpy()}")
                     return self.q_net(observation.float()).detach().cpu().argmax(axis=1).numpy()
                 return torch.argmax(self.q_net(observation))
 
     def __transform_vector_observation(self, observation):
+        """Applies the transform to each image in each stack of `observation`."""
         for _ in observation:
             for stack in observation:
                 for img in stack:
                     img = self.transforms(img)
     
     def epsilon_schedule(self, frame):
+        """Linearly anneals epsilon from `self.eps_start` to `self.eps_end` based on `frame`."""
         return max(self.eps_end, self.eps_start - frame * (self.eps_start - self.eps_end) / self.eps_frame_to_end)
 
-    # Only used during testing once training is complete
     def evaluate(self, observation):
+        """Gets the action outputted by the Q network. Only used during testing once training is complete."""
         return torch.argmax(self.q_net(observation)).item()
