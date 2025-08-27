@@ -1,6 +1,6 @@
 # Deep Q-Learning
 ## Overview
-This project uses Deep Q-Learning to solve some of the RL environments with a discrete action space in Farama's Gymnasium. This includes some classic control problems, like Cart Pole and Mountain Car, as well as some Atari games in the Arcade Learning Environment (ALE), like Breakout.
+This project uses Deep Q-Learning to solve some of the RL environments with a discrete action space in Farama's Gymnasium. This includes some classic control problems, like CartPole and MountainCar, as well as some Atari games in the Arcade Learning Environment (ALE), like Breakout.
 
 ## Quickstart
 ### Prerequisites
@@ -17,7 +17,7 @@ This project uses Deep Q-Learning to solve some of the RL environments with a di
     python classic_control.py ENVIRONMENT_NAME --train EPISODES MODEL_PATH.pt
     ```
 
-    For example, to train on the latest version of the Cart Pole environment for 1000 episodes, write the following command:
+    For example, to train on the latest version of the CartPole environment for 1000 episodes, write the following command:
 
     ```bash
     python classic_control.py CartPole-v1 --train 1000 cartpole.pt
@@ -73,4 +73,8 @@ The following environments have pretrained models under the `pretrained/` direct
     - Acrobot-v1
     - MountainCar-v0
 - Atari
-    - Breakout-v5 (note: needs further training to reach human level performance)
+    - Breakout-v5 (note: needs further training to reach human-level performance)
+
+## Acknowledgments
+
+The main algorithm behind this project, Deep Q-Learning, is based on the 2013 DeepMind paper titled ["Playing Atari with Deep Reinforcement Learning"](https://arxiv.org/abs/1312.5602).
