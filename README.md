@@ -70,6 +70,12 @@ This project uses Deep Q-Learning to solve some of the RL environments with a di
 
     This will record a video of the model's performance for one episode and save the video to the local directory.
 
+4. Additionally, for Atari environments, this program allows loading and saving checkpoints for training via the `--load-checkpoint` and `--save_checkpoint` flags.
+
+    ```bash
+    python atari.py ENVIRONMENT_NAME --train 100 MODEL_PATH --load-checkpoint CHECKPOINT_1 --save-checkpoint CHECKPOINT-2
+    ```
+
 ## Pretrained Environments
 
 The following environments have pretrained models under the `pretrained/` directory:
