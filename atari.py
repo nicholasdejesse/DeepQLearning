@@ -62,7 +62,7 @@ parser.add_argument("--save-checkpoint", help="Saves the current state of the mo
 args = parser.parse_args()
 
 if args.train:
-    print("Beginning training.")
+    print("Beginning training...")
     start = time.time()
     envs = AtariVectorEnv(
         game=args.environment,
@@ -92,6 +92,7 @@ if args.train:
         eps_frame_to_end = 1_000_000,
     )
     if args.load_checkpoint:
+        print("Loading checkpoint...")
         network.load_checkpoint(torch.load(f"{args.load_checkpoint}.tar", weights_only=False))
 
     network.transforms = transforms
@@ -101,6 +102,7 @@ if args.train:
     envs.close()
     torch.save(network.q_net.state_dict(), f"{args.train[1]}.pt")
     if args.save_checkpoint:
+        print("Saving checkpoint...")
         torch.save(network.get_checkpoint(), f"{args.save_checkpoint}.tar")
     end = time.time()
     print(f"Training complete after {int((end - start) // 60)} mins {round((end - start) % 60, 2)} secs.")

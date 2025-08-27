@@ -52,7 +52,7 @@ args = parser.parse_args()
 # plt.show()
 
 if args.train:
-    print("Beginning training.")
+    print("Beginning training...")
     start = time.time()
     train_env = gym.make(args.environment)
     network = dqn.DeepQNetwork(

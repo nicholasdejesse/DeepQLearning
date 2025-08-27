@@ -19,16 +19,25 @@ Transition = namedtuple("Transition", ("state", "action", "reward", "next_state"
 
 class Memory:
     def __init__(self, capacity):
-        self.mem = deque(maxlen=capacity)
+        self.read_index = 0
+        self.write_index = 0
+        self.capacity = capacity
+        # Using custom ring buffer implementation since sampling from deque is O(N x M)
+        self.mem = np.zeros((capacity), dtype=Transition)
 
     def append(self, *args):
-        self.mem.append(Transition(*args))
+        self.mem[self.write_index] = Transition(*args)
+        self.read_index += 1
+        self.write_index += 1
+        if self.write_index >= self.capacity:
+            self.write_index = 0
+        self.read_index = min(self.read_index, self.capacity)
 
     def sample(self, k):
-        return random.sample(self.mem, k)
+        return np.random.choice(self.mem[0:self.read_index], size=k, replace=False)
     
     def __len__(self):
-        return len(self.mem)
+        return self.write_index
 
 class DeepQNetwork:
     def __init__(self, env, device, network, net_input, net_output,
