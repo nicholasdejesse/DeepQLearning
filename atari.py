@@ -57,8 +57,8 @@ parser.add_argument("environment", help="The name of the environment to use.")
 parser.add_argument("--train", nargs=2, help="Flag to train the model. Specify the number of episodes to train for and the filename of the model. Will render a graph of rewards after training completes.")
 parser.add_argument("--load", help="Loads the model at the given filepath and renders the environment to use it on for 10 episodes.")
 parser.add_argument("--record", help="Loads the model at the given filepath and records a video of one episode.")
+parser.add_argument("--load-checkpoint", help="Starts training from the checkpoint specified instead of starting from scratch.")
 parser.add_argument("--save-checkpoint", help="Saves the current state of the model after training completes to the given file.")
-parser.add_argument("--from-checkpoint", help="Starts training from the checkpoint specified instead of starting from scratch.")
 args = parser.parse_args()
 
 if args.train:
@@ -91,8 +91,8 @@ if args.train:
         eps_end = 0.1,
         eps_frame_to_end = 1_000_000,
     )
-    if args.from_checkpoint:
-        network.load_checkpoint(torch.load(f"{args.from_checkpoint}.tar", weights_only=False))
+    if args.load_checkpoint:
+        network.load_checkpoint(torch.load(f"{args.load_checkpoint}.tar", weights_only=False))
 
     network.transforms = transforms
 
