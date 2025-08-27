@@ -1,4 +1,7 @@
 # Deep Q-Learning
+
+!(A screenshot of the model playing Breakout)[./img/breakout.png]
+
 ## Overview
 This project uses Deep Q-Learning to solve some of the RL environments with a discrete action space in Farama's Gymnasium. This includes some classic control problems, like CartPole and MountainCar, as well as some Atari games in the Arcade Learning Environment (ALE), like Breakout.
 
