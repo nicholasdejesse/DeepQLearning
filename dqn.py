@@ -61,7 +61,8 @@ class DeepQNetwork:
         self.frames_trained = 0
         self.rewards = []
 
-    def train(self, episodes):
+    def train(self, episodes: int):
+        """Trains model for `episodes`."""
         self.q_net.train()
         self.target_net.train()
         for _ in tqdm(range(episodes)):
@@ -94,7 +95,11 @@ class DeepQNetwork:
                 if self.frames_trained % self.target_net_update == 0:
                     self.target_net.load_state_dict(self.q_net.state_dict())
 
-    def train_vector(self, episodes):
+    def train_vector(self, episodes: int):
+        """
+        Trains model for `episodes`. Assumes the environment given in the constructor is a vector environment with
+        `autoreset_mode=gym.vector.AutoresetMode.NEXT_STEP`.
+        """
         self.q_net.train()
         self.target_net.train()
         episode_count = 0
@@ -153,8 +158,11 @@ class DeepQNetwork:
     def __optimize(self):
         if len(self.memory) < self.min_memory_to_train:
             return
+        
+        # Transpose transitions to group together each state, action, etc.
         batch = Transition(*zip(*self.memory.sample(BATCH_SIZE)))
 
+        # Only convert to float during gradient descent to save memory
         states = torch.stack(batch.state).squeeze().to(self.device).float()
         actions = torch.stack(batch.action, 0)
         rewards = torch.stack(batch.reward).squeeze()
@@ -175,6 +183,7 @@ class DeepQNetwork:
         self.optimizer.step()
                 
     def __select_action(self, observation):
+        """Selects either a random action or the action given by the Q network, based on epsilon."""
         r = random.random()
         eps = self.epsilon_schedule(self.frames_trained)
         if r < eps:
