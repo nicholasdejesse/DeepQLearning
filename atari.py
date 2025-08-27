@@ -57,6 +57,8 @@ parser.add_argument("environment", help="The name of the environment to use.")
 parser.add_argument("--train", nargs=2, help="Flag to train the model. Specify the number of episodes to train for and the filename of the model. Will render a graph of rewards after training completes.")
 parser.add_argument("--load", help="Loads the model at the given filepath and renders the environment to use it on for 10 episodes.")
 parser.add_argument("--record", help="Loads the model at the given filepath and records a video of one episode.")
+parser.add_argument("--save-checkpoint", help="Saves the current state of the model after training completes to the given file.")
+parser.add_argument("--from-checkpoint", help="Starts training from the checkpoint specified instead of starting from scratch.")
 args = parser.parse_args()
 
 if args.train:
@@ -89,16 +91,20 @@ if args.train:
         eps_end = 0.1,
         eps_frame_to_end = 1_000_000,
     )
-    
+    if args.from_checkpoint:
+        network.load_checkpoint(torch.load(f"{args.from_checkpoint}.tar", weights_only=False))
+
     network.transforms = transforms
 
     network.train_vector(int(args.train[0]))
 
     envs.close()
-    torch.save(network.q_net.state_dict(), args.train[1])
+    torch.save(network.q_net.state_dict(), f"{args.train[1]}.pt")
+    if args.save_checkpoint:
+        torch.save(network.get_checkpoint(), f"{args.save_checkpoint}.tar")
     end = time.time()
     print(f"Training complete after {int((end - start) // 60)} mins {round((end - start) % 60, 2)} secs.")
-    print(f"Trained for {network.frames_trained} frames.")
+    print(f"Trained for {network.frames_trained} frames total.")
 
     plt.plot(network.rewards)
     plt.title("Rewards over episodes")
@@ -147,7 +153,7 @@ elif args.load or args.record:
         eps_frame_to_end = 200_000,
     )
     network.q_net.eval()
-    network.q_net.load_state_dict(torch.load(args.load if args.load is not None else args.record, weights_only=True))
+    network.q_net.load_state_dict(torch.load(f"{args.load}.pt" if args.load is not None else f"{args.record}.pt", weights_only=True))
 
     for e in range(num_episodes):
         total_episode_reward = 0

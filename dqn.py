@@ -208,3 +208,21 @@ class DeepQNetwork:
     def evaluate(self, observation):
         """Gets the action outputted by the Q network. Only used during testing once training is complete."""
         return torch.argmax(self.q_net(observation)).item()
+    
+    def get_checkpoint(self):
+        return {
+            "frames_trained": self.frames_trained,
+            "rewards": self.rewards,
+            "memory": self.memory,
+            "q_net_dict": self.q_net.state_dict(),
+            "target_net_dict": self.target_net.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+        }
+
+    def load_checkpoint(self, checkpoint):
+        self.frames_trained = checkpoint["frames_trained"]
+        self.rewards = checkpoint["rewards"]
+        self.memory = checkpoint["memory"]
+        self.q_net.load_state_dict(checkpoint["q_net_dict"])
+        self.target_net.load_state_dict(checkpoint["target_net_dict"])
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])

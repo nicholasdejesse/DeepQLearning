@@ -73,7 +73,7 @@ if args.train:
     )
     network.train(int(args.train[0]))
     train_env.close()
-    torch.save(network.q_net.state_dict(), args.train[1])
+    torch.save(network.q_net.state_dict(), f"{args.train[1]}.pt")
     end = time.time()
     print(f"Training complete after {int((end - start) // 60)} mins {round((end - start) % 60, 2)} secs.")
     print(f"Trained for {network.frames_trained} frames.")
@@ -88,7 +88,7 @@ if args.load:
     human_env = gym.make(args.environment, render_mode="human")
     network = dqn.DeepQNetwork(human_env, device, LinearRelu, human_env.observation_space.shape[0], human_env.action_space.n)
     network.q_net.eval()
-    network.q_net.load_state_dict(torch.load(args.load, weights_only=True))
+    network.q_net.load_state_dict(torch.load(f"{args.load}.pt", weights_only=True))
     for _ in range(10):
         observation, _ = human_env.reset()
 

@@ -180,4 +180,6 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Project specific stuff
 /videos
+/checkpoints
